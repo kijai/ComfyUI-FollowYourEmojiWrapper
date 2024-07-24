@@ -1,0 +1,6 @@
+hugginface_hub
+pillow
+opencv-python
+mediapipe
+transformers
+einops
