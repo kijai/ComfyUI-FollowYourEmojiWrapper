@@ -24,7 +24,7 @@ from ..diffusers.utils import BaseOutput, is_accelerate_available
 from ..diffusers.utils.torch_utils import randn_tensor
 
 from ..models.utils.pipeline_context import get_context_scheduler
-from ..models.utils.pipeline_utils import get_tensor_interpolation_method
+from ..models.utils.pipeline_utils import get_tensor_interpolation_method, set_tensor_interpolation_method
 
 from comfy.utils import ProgressBar
 
@@ -408,6 +408,8 @@ class VideoPipeline(DiffusionPipeline):
             encoder_hidden_states.dtype,
             device,
             generator)
+        
+        set_tensor_interpolation_method(is_slerp=True)
 
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
@@ -594,8 +596,8 @@ class VideoPipeline(DiffusionPipeline):
         context_overlap=4,
         context_batch_size=1,
         interpolation_factor=1,
-        t_tile_length=None,
-        t_tile_overlap=None,
+        t_tile_length=16,
+        t_tile_overlap=4,
         **kwargs,
     ):
         # Default height and width to unet
@@ -670,7 +672,7 @@ class VideoPipeline(DiffusionPipeline):
 
         t_tile_weights = self._gaussian_weights(t_tile_length=t_tile_length, t_batch_size=1).to(device=latents.device)
         t_tile_weights = t_tile_weights.to(dtype=lmk_fea.dtype)
-
+        comfy_pbar = ProgressBar(num_inference_steps)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
 
@@ -761,6 +763,7 @@ class VideoPipeline(DiffusionPipeline):
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or (i + 1) % self.scheduler.order == 0:
                     progress_bar.update()
+                    comfy_pbar.update(1)
 
         # ---------------------------------------------
 

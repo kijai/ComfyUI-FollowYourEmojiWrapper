@@ -207,20 +207,14 @@ class FYESampler:
 
         B, H, W, C = ref_image.shape
        
-        # tensor to pil image
-        #ref_frame = torch.clamp((ref_image + 1.0) / 2.0, min=0, max=1)
         ref_frame = ref_image[0]
         ref_frame = (ref_frame * 255).cpu().numpy().astype(np.uint8)
         ref_image = Image.fromarray(ref_frame)
-        # tensor to pil image
+
         motions = (motions * 255).cpu().numpy().astype(np.uint8)  # Convert the whole batch
         lmk_images = [Image.fromarray(motion) for motion in motions]  # Convert each frame
-        print(len(lmk_images))
-
-        print(len(motions))
 
         clip_image = clip_preprocess(clip_image.clone(), 224)
-        print(clip_image.shape)
 
         generator = torch.Generator(device=device)
         generator.manual_seed(seed)
@@ -238,6 +232,62 @@ class FYESampler:
                         context_overlap=context_overlap,
                         context_stride=context_stride,
                         interpolation_factor=latent_interpolation_factor
+                        ).videos
+        
+        preds = preds.permute((0,2,3,4,1)).squeeze(0)
+       
+        return(preds,)
+    
+class FYESamplerLong:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+
+            "pipeline": ("FYEPIPE",),
+            "ref_image": ("IMAGE",),
+            "clip_image": ("IMAGE",),
+            "motions": ("IMAGE",),
+            "steps": ("INT", {"default": 25, "min": 1}),
+            "cfg": ("FLOAT", {"default": 3.5, "min": 0.0, "max": 30.0, "step": 0.01}),
+            "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+            "t_tile_length": ("INT", {"default": 16, "min": 8, "max": 256}),
+            "t_tile_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "process"
+    CATEGORY = "FollowYourEmojiWrapper"
+
+    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap):
+        device = mm.get_torch_device()
+
+        B, H, W, C = ref_image.shape
+       
+        ref_frame = ref_image[0]
+        ref_frame = (ref_frame * 255).cpu().numpy().astype(np.uint8)
+        ref_image = Image.fromarray(ref_frame)
+
+        motions = (motions * 255).cpu().numpy().astype(np.uint8)  # Convert the whole batch
+        lmk_images = [Image.fromarray(motion) for motion in motions]  # Convert each frame
+
+        clip_image = clip_preprocess(clip_image.clone(), 224)
+
+        generator = torch.Generator(device=device)
+        generator.manual_seed(seed)
+
+        preds = pipeline.forward_long(ref_image=ref_image,
+                        lmk_images=lmk_images,
+                        width=W,
+                        height=H,
+                        video_length=len(motions),
+                        num_inference_steps=steps,
+                        guidance_scale=cfg,
+                        generator=generator,
+                        clip_image=clip_image[0],
+                        t_tile_length=t_tile_length,
+                        t_tile_overlap=t_tile_overlap,
                         ).videos
         
         preds = preds.permute((0,2,3,4,1)).squeeze(0)
@@ -317,10 +367,12 @@ class FYEMediaPipe:
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadFYEModel": DownloadAndLoadFYEModel,
     "FYESampler": FYESampler,
-    "FYEMediaPipe": FYEMediaPipe
+    "FYEMediaPipe": FYEMediaPipe,
+    "FYESamplerLong": FYESamplerLong
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadFYEModel": "(Down)LoadFYE Model",
     "FYESampler": "FYESampler",
-    "FYEMediaPipe": "MediaPipe"
+    "FYEMediaPipe": "MediaPipe",
+    "FYESamplerLong": "FYESamplerLong"
     }
