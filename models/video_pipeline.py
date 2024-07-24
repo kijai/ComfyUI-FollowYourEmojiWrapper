@@ -475,6 +475,7 @@ class VideoPipeline(DiffusionPipeline):
                         latents.shape[2],
                         context_frames,
                         context_stride,
+                        context_overlap,
                         0,
                     )
                 )
