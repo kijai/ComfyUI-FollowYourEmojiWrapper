@@ -193,7 +193,8 @@ class FYESampler:
             "context_frames": ("INT", {"default": 24, "min": 8, "max": 48}),
             "context_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
             "context_stride": ("INT", {"default": 1, "min": 1, "max": 8}),
-            "latent_interpolation_factor": ("INT", {"default": 1, "min": 1, "max": 10})
+            "latent_interpolation_factor": ("INT", {"default": 1, "min": 1, "max": 10}),
+            "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01})
             }
         }
 
@@ -202,7 +203,7 @@ class FYESampler:
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor):
+    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor, pose_multiplier):
         device = mm.get_torch_device()
 
         B, H, W, C = ref_image.shape
@@ -231,7 +232,8 @@ class FYESampler:
                         context_frames=context_frames,
                         context_overlap=context_overlap,
                         context_stride=context_stride,
-                        interpolation_factor=latent_interpolation_factor
+                        interpolation_factor=latent_interpolation_factor,
+                        pose_multiplier=pose_multiplier
                         ).videos
         
         preds = preds.permute((0,2,3,4,1)).squeeze(0)
@@ -252,6 +254,7 @@ class FYESamplerLong:
             "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             "t_tile_length": ("INT", {"default": 16, "min": 8, "max": 256}),
             "t_tile_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
+            "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01})
             }
         }
 
@@ -260,7 +263,7 @@ class FYESamplerLong:
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap):
+    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap, pose_multiplier):
         device = mm.get_torch_device()
 
         B, H, W, C = ref_image.shape
@@ -288,6 +291,7 @@ class FYESamplerLong:
                         clip_image=clip_image[0],
                         t_tile_length=t_tile_length,
                         t_tile_overlap=t_tile_overlap,
+                        pose_multiplier=pose_multiplier
                         ).videos
         
         preds = preds.permute((0,2,3,4,1)).squeeze(0)

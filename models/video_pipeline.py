@@ -363,6 +363,7 @@ class VideoPipeline(DiffusionPipeline):
         context_overlap=4,
         context_batch_size=1,
         interpolation_factor=1,
+        pose_multiplier=1.0,
         **kwargs,
     ):
         # Default height and width to unet
@@ -518,6 +519,7 @@ class VideoPipeline(DiffusionPipeline):
                                       reference_down_block_res_samples=reference_down_block_res_samples,
                                       reference_mid_block_res_sample=reference_mid_block_res_sample,
                                       reference_up_block_res_samples=reference_up_block_res_samples,
+                                      pose_multiplier=pose_multiplier
                                       ).sample
 
                     for j, c in enumerate(context):
@@ -598,6 +600,7 @@ class VideoPipeline(DiffusionPipeline):
         interpolation_factor=1,
         t_tile_length=16,
         t_tile_overlap=4,
+        pose_multiplier=1.0,
         **kwargs,
     ):
         # Default height and width to unet
@@ -727,6 +730,7 @@ class VideoPipeline(DiffusionPipeline):
                                             reference_down_block_res_samples=reference_down_block_res_samples,
                                             reference_mid_block_res_sample=reference_mid_block_res_sample,
                                             reference_up_block_res_samples=reference_up_block_res_samples,
+                                            pose_multiplier=pose_multiplier
                                             ).sample
 
                     # perform guidance
