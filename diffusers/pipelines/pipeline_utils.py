@@ -591,20 +591,20 @@ class DiffusionPipeline(ConfigMixin, PushToHubMixin):
             # set models
             setattr(self, name, module)
 
-    def __setattr__(self, name: str, value: Any):
-        if name in self.__dict__ and hasattr(self.config, name):
-            # We need to overwrite the config if name exists in config
-            if isinstance(getattr(self.config, name), (tuple, list)):
-                if value is not None and self.config[name][0] is not None:
-                    class_library_tuple = (value.__module__.split(".")[0], value.__class__.__name__)
-                else:
-                    class_library_tuple = (None, None)
+    # def __setattr__(self, name: str, value: Any):
+    #     if name in self.__dict__ and hasattr(self.config, name):
+    #         # We need to overwrite the config if name exists in config
+    #         if isinstance(getattr(self.config, name), (tuple, list)):
+    #             if value is not None and self.config[name][0] is not None:
+    #                 class_library_tuple = (value.__module__.split(".")[0], value.__class__.__name__)
+    #             else:
+    #                 class_library_tuple = (None, None)
 
-                self.register_to_config(**{name: class_library_tuple})
-            else:
-                self.register_to_config(**{name: value})
+    #             self.register_to_config(**{name: class_library_tuple})
+    #         else:
+    #             self.register_to_config(**{name: value})
 
-        super().__setattr__(name, value)
+    #     super().__setattr__(name, value)
 
     def save_pretrained(
         self,

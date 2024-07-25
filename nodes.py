@@ -94,22 +94,26 @@ class DownloadAndLoadFYEModel:
                 local_dir_use_symlinks=False,
             )
 
+        ref_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "unet_config.json"))
+        ad_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))
+        #image_encoder_config = OmegaConf.load(os.path.join(script_directory, "configs", "image_encoder_config.json"))
+
+        fye_base_path = os.path.join(folder_paths.models_dir, "FYE")
+        referencenet_path = os.path.join(fye_base_path, "FYE_referencenet-fp16.safetensors")
+        unet_path = os.path.join(fye_base_path, "FYE_unet-fp16.safetensors")
+        lmk_guider_path = os.path.join(fye_base_path, "FYE_lmk_guider.safetensors")
+        #image_encoder_path = os.path.join(fye_base_path, "sd-image-variations-encoder-fp16.safetensors")
+
         pbar.update(1)
 
         image_encoder = CLIPVisionModelWithProjection.from_pretrained(model_path, subfolder="image_encoder").to(dtype).to(device)
 
         pbar.update(1)
 
-        ref_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "unet_config.json"))
-        ad_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))
-        fye_base_path = os.path.join(folder_paths.models_dir, 'FYE')
-        referencenet_path = os.path.join(fye_base_path, 'FYE_referencenet-fp16.safetensors')
-        unet_path = os.path.join(fye_base_path, 'FYE_unet-fp16.safetensors')
-        lmk_guider_path = os.path.join(fye_base_path, 'FYE_lmk_guider.safetensors')
-
         with (init_empty_weights() if is_accelerate_available else nullcontext()):
             referencenet = ReferenceNet2DConditionModel(**ref_unet_config)
             ad_unet = UNet3DConditionModel(**ad_unet_config)
+           
         
         pbar.update(1)
        
@@ -123,7 +127,7 @@ class DownloadAndLoadFYEModel:
                 local_dir=fye_base_path,
                 local_dir_use_symlinks=False,
             )
-
+        #reference unet
         sd = comfy.utils.load_torch_file(referencenet_path)
         if is_accelerate_available:
             for key in sd:
@@ -131,6 +135,9 @@ class DownloadAndLoadFYEModel:
         else:
             referencenet.load_state_dict(sd)
             referencenet.to(dtype).to(device)
+
+        pbar.update(1)
+        #3d unet
         sd = comfy.utils.load_torch_file(unet_path)
         if is_accelerate_available:
             for key in sd:
@@ -139,8 +146,17 @@ class DownloadAndLoadFYEModel:
             ad_unet.load_state_dict(sd, strict=False)
             ad_unet.to(dtype).to(device)
 
-        
-        
+        pbar.update(1)
+        # #image encoder
+        # sd = comfy.utils.load_torch_file(image_encoder_path)
+        # if is_accelerate_available:
+        #     for key in sd:
+        #         set_module_tensor_to_device(image_encoder, key, device=device, dtype=dtype, value=sd[key])
+        # else:
+        #     image_encoder.load_state_dict(sd, strict=False)
+        #     image_encoder.to(dtype).to(device)
+
+        #guider
         sd = comfy.utils.load_torch_file(lmk_guider_path)
         lmk_guider = Guider(conditioning_embedding_channels=320, block_out_channels=(16, 32, 96, 256)).to(dtype).to(device)
         lmk_guider.load_state_dict(sd)

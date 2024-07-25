@@ -605,7 +605,6 @@ class VideoPipeline(DiffusionPipeline):
                     comfy_pbar.update(1)
 
         # ---------------------------------------------
-
         return latents
 
     def get_timesteps(self, num_inference_steps):
