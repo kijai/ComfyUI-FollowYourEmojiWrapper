@@ -343,6 +343,7 @@ class VideoPipeline(DiffusionPipeline):
     def __call__(
         self,
         ref_image,
+        ref_image_latents,
         lmk_images,
         width,
         height,
@@ -416,12 +417,13 @@ class VideoPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # Prepare ref image latents
-        ref_image_tensor = self.ref_image_processor.preprocess(
-            ref_image, height=height, width=width
-        )  # (bs, c, width, height)
+        if ref_image_latents is None:
+            ref_image_tensor = self.ref_image_processor.preprocess(
+                ref_image, height=height, width=width
+            )  # (bs, c, width, height)
 
-        ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
-        ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
+            ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
+            ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
         ref_image_latents = ref_image_latents * self.vae.config.scaling_factor  # (b, 4, h, w)
 
         # Prepare a list of lmk condition images
@@ -553,16 +555,16 @@ class VideoPipeline(DiffusionPipeline):
             latents = self.interpolate_latents(latents, interpolation_factor, device)
 
         # Post-processing
-        images = self.decode_latents(latents)  # (b, c, f, h, w)
+        #images = self.decode_latents(latents)  # (b, c, f, h, w)
 
         # Convert to tensor
-        if output_type == "tensor":
-            images = torch.from_numpy(images)
+       # if output_type == "tensor":
+        #    images = torch.from_numpy(images)
 
-        if not return_dict:
-            return images
-
-        return VideoPipelineOutput(videos=images)
+        #if not return_dict:
+       #     return images
+        return latents
+        #return VideoPipelineOutput(videos=images)
 
     def _gaussian_weights(self, t_tile_length, t_batch_size):
         from numpy import pi, exp, sqrt
@@ -578,6 +580,7 @@ class VideoPipeline(DiffusionPipeline):
     def forward_long(
         self,
         ref_image,
+        ref_image_latents,
         lmk_images,
         width,
         height,
@@ -651,10 +654,11 @@ class VideoPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # Prepare ref image latents
-        ref_image_tensor = self.ref_image_processor.preprocess(ref_image, height=height, width=width)  # (bs, c, width, height)
+        if ref_image_latents is None:
+            ref_image_tensor = self.ref_image_processor.preprocess(ref_image, height=height, width=width)  # (bs, c, width, height)
 
-        ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
-        ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
+            ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
+            ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
         ref_image_latents = ref_image_latents * self.vae.config.scaling_factor  # (b, 4, h, w)
 
         # Prepare a list of lmk condition images
@@ -772,16 +776,17 @@ class VideoPipeline(DiffusionPipeline):
         # ---------------------------------------------
 
         # Post-processing
-        images = self.decode_latents(latents)  # (b, c, f, h, w)
+        #images = self.decode_latents(latents)  # (b, c, f, h, w)
 
         # Convert to tensor
-        if output_type == "tensor":
-            images = torch.from_numpy(images)
+        #if output_type == "tensor":
+        #    images = torch.from_numpy(images)
 
-        if not return_dict:
-            return images
+        #if not return_dict:
+        #    return images
 
-        return VideoPipelineOutput(videos=images)
+        return latents
+        #return VideoPipelineOutput(videos=images)
 
     def get_timesteps(self, num_inference_steps):
         # get the original timestep using init_timestep

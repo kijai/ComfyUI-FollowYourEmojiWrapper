@@ -8,6 +8,7 @@ from comfy.clip_vision import clip_preprocess
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
+from omegaconf import OmegaConf
 
 from .models.guider import Guider
 from .models.referencenet import ReferenceNet2DConditionModel
@@ -21,6 +22,14 @@ import cv2
 
 from transformers import CLIPVisionModelWithProjection
 from .diffusers import AutoencoderKL, DDIMScheduler
+
+from contextlib import nullcontext
+try:
+    from accelerate import init_empty_weights
+    from accelerate.utils import set_module_tensor_to_device
+    is_accelerate_available = True
+except:
+    pass
 
 script_directory = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,7 +54,6 @@ class DownloadAndLoadFYEModel:
     def INPUT_TYPES(s):
         return {
             "required": {
-                "motion_model":("MOTION_MODEL_ADE",),
                 
             },
             "optional": {
@@ -65,7 +73,7 @@ class DownloadAndLoadFYEModel:
     FUNCTION = "loadmodel"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def loadmodel(self, precision, motion_model):
+    def loadmodel(self, precision):
         device = mm.get_torch_device()
         mm.soft_empty_cache()
 
@@ -81,7 +89,7 @@ class DownloadAndLoadFYEModel:
 
             snapshot_download(
                 repo_id="lambdalabs/sd-image-variations-diffusers",
-                ignore_patterns=["*safety_checker*"],
+                ignore_patterns=["*safety_checker*", "*unet*", "*vae*"],
                 local_dir=model_path,
                 local_dir_use_symlinks=False,
             )
@@ -94,40 +102,14 @@ class DownloadAndLoadFYEModel:
 
         pbar.update(1)
 
-        referencenet_additional_kwargs = {
-            "info_mode": "addRefImg",
-        }
-
-        referencenet = ReferenceNet2DConditionModel.from_pretrained_2d(model_path, subfolder="unet",
-                                                                    referencenet_additional_kwargs=referencenet_additional_kwargs).to(dtype).to(device)
+        ref_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "unet_config.json"))
+        ad_unet = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))
+        with (init_empty_weights() if is_accelerate_available else nullcontext()):
+            referencenet = ReferenceNet2DConditionModel(**ref_unet_config)
+            ad_unet = UNet3DConditionModel(**ad_unet)
+        
         pbar.update(1)
-
-        unet_additional_kwargs = {
-            "use_inflated_groupnorm": True,
-            "unet_use_cross_frame_attention": False,
-            "unet_use_temporal_attention": False,
-            "use_motion_module": True,
-            "motion_module_resolutions": [1, 2, 4, 8],
-            "motion_module_mid_block": True,
-            "motion_module_decoder_only": False,
-            "motion_module_type": "Vanilla",
-            "motion_module_kwargs": {
-                "num_attention_heads": 8,
-                "num_transformer_block": 1,
-                "attention_block_types": ["Temporal_Self", "Temporal_Self"],
-                "temporal_position_encoding": True,
-                "temporal_position_encoding_max_len": 32,
-                "temporal_attention_dim_div": 1,
-            },
-            "attention_mode": "SpatialAtten"
-        }
-
-        unet = UNet3DConditionModel.from_pretrained_2d(
-                        model_path,
-                        subfolder="unet",
-                        motion_module=motion_model,
-                        unet_additional_kwargs=unet_additional_kwargs).to(dtype).to(device)
-
+       
         lmk_guider = Guider(conditioning_embedding_channels=320, block_out_channels=(16, 32, 96, 256)).to(dtype).to(device)
 
         fye_base_path = os.path.join(folder_paths.models_dir, 'FYE')
@@ -146,9 +128,20 @@ class DownloadAndLoadFYEModel:
             )
 
         sd = comfy.utils.load_torch_file(referencenet_path)
-        referencenet.load_state_dict(sd)
+        if is_accelerate_available:
+            for key in sd:
+                set_module_tensor_to_device(referencenet, key, device=device, dtype=dtype, value=sd[key])
+        else:
+            referencenet.load_state_dict(sd)
+            referencenet.to(dtype).to(device)
         sd = comfy.utils.load_torch_file(unet_path)
-        unet.load_state_dict(sd)
+        if is_accelerate_available:
+            for key in sd:
+                set_module_tensor_to_device(ad_unet, key, device=device, dtype=dtype, value=sd[key])
+        else:
+            ad_unet.load_state_dict(sd, strict=False)
+            ad_unet.to(dtype).to(device)
+        
         sd = comfy.utils.load_torch_file(lmk_guider_path)
         lmk_guider.load_state_dict(sd)
 
@@ -171,7 +164,7 @@ class DownloadAndLoadFYEModel:
         pipeline = VideoPipeline(vae=vae,
                              image_encoder=image_encoder,
                              referencenet=referencenet,
-                             unet=unet,
+                             unet=ad_unet,
                              lmk_guider=lmk_guider,
                              scheduler=noise_scheduler)
 
@@ -182,9 +175,8 @@ class FYESampler:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-
             "pipeline": ("FYEPIPE",),
-            "ref_image": ("IMAGE",),
+            "ref_latent": ("LATENT", ),
             "clip_image": ("IMAGE",),
             "motions": ("IMAGE",),
             "steps": ("INT", {"default": 25, "min": 1}),
@@ -198,29 +190,18 @@ class FYESampler:
             }
         }
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("images",)
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("samples",)
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor, pose_multiplier):
-        device = mm.get_torch_device()
+    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor, pose_multiplier):
 
-        B, H, W, C = ref_image.shape
-       
-        ref_frame = ref_image[0]
-        ref_frame = (ref_frame * 255).cpu().numpy().astype(np.uint8)
-        ref_image = Image.fromarray(ref_frame)
+        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image = common_process(pipeline, ref_latent, motions, steps, seed, clip_image)
 
-        motions = (motions * 255).cpu().numpy().astype(np.uint8)  # Convert the whole batch
-        lmk_images = [Image.fromarray(motion) for motion in motions]  # Convert each frame
-
-        clip_image = clip_preprocess(clip_image.clone(), 224)
-
-        generator = torch.Generator(device=device)
-        generator.manual_seed(seed)
-
-        preds = pipeline(ref_image=ref_image,
+        latents = pipeline(
+                        ref_image=None,
+                        ref_image_latents=ref_sample,
                         lmk_images=lmk_images,
                         width=W,
                         height=H,
@@ -228,25 +209,42 @@ class FYESampler:
                         num_inference_steps=steps,
                         guidance_scale=cfg,
                         generator=generator,
-                        clip_image=clip_image[0],
+                        clip_image=clip_image,
                         context_frames=context_frames,
                         context_overlap=context_overlap,
                         context_stride=context_stride,
                         interpolation_factor=latent_interpolation_factor,
                         pose_multiplier=pose_multiplier
-                        ).videos
-        
-        preds = preds.permute((0,2,3,4,1)).squeeze(0)
+                        )
+
+        latents = latents.squeeze(0).permute(1,0,2,3) / 0.18215
        
-        return(preds,)
+        return({"samples":latents},)
     
+def common_process(pipeline, ref_latent, motions, steps, seed, clip_image):
+    device = mm.get_torch_device()
+    dtype = pipeline.unet.dtype
+
+    ref_sample = ref_latent["samples"]
+    ref_sample = ref_sample.to(dtype).to(device)
+    H = int(ref_sample.shape[2] * 8)
+    W = int(ref_sample.shape[3] * 8)
+
+    motions = (motions * 255).cpu().numpy().astype(np.uint8)
+    lmk_images = [Image.fromarray(motion) for motion in motions]
+
+    clip_image = clip_preprocess(clip_image.clone(), 224)
+
+    generator = torch.Generator(device=device)
+    generator.manual_seed(seed)
+    return (pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image[0])
+
 class FYESamplerLong:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
-
             "pipeline": ("FYEPIPE",),
-            "ref_image": ("IMAGE",),
+            "ref_latent": ("LATENT", ),
             "clip_image": ("IMAGE",),
             "motions": ("IMAGE",),
             "steps": ("INT", {"default": 25, "min": 1}),
@@ -255,32 +253,21 @@ class FYESamplerLong:
             "t_tile_length": ("INT", {"default": 16, "min": 8, "max": 256}),
             "t_tile_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
             "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01})
-            }
+            },
         }
 
-    RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("images",)
+    RETURN_TYPES = ("LATENT",)
+    RETURN_NAMES = ("samples",)
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_image, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap, pose_multiplier):
-        device = mm.get_torch_device()
+    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap, pose_multiplier):
+      
+        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image = common_process(pipeline, ref_latent, motions, steps, seed, clip_image)
 
-        B, H, W, C = ref_image.shape
-       
-        ref_frame = ref_image[0]
-        ref_frame = (ref_frame * 255).cpu().numpy().astype(np.uint8)
-        ref_image = Image.fromarray(ref_frame)
-
-        motions = (motions * 255).cpu().numpy().astype(np.uint8)  # Convert the whole batch
-        lmk_images = [Image.fromarray(motion) for motion in motions]  # Convert each frame
-
-        clip_image = clip_preprocess(clip_image.clone(), 224)
-
-        generator = torch.Generator(device=device)
-        generator.manual_seed(seed)
-
-        preds = pipeline.forward_long(ref_image=ref_image,
+        latents = pipeline.forward_long(
+                        ref_image=None,
+                        ref_image_latents=ref_sample,
                         lmk_images=lmk_images,
                         width=W,
                         height=H,
@@ -288,15 +275,15 @@ class FYESamplerLong:
                         num_inference_steps=steps,
                         guidance_scale=cfg,
                         generator=generator,
-                        clip_image=clip_image[0],
+                        clip_image=clip_image,
                         t_tile_length=t_tile_length,
                         t_tile_overlap=t_tile_overlap,
                         pose_multiplier=pose_multiplier
-                        ).videos
-        
-        preds = preds.permute((0,2,3,4,1)).squeeze(0)
+                        )
+
+        latents = latents.squeeze(0).permute(1,0,2,3) / 0.18215
        
-        return(preds,)
+        return({"samples":latents},)
     
 class FYEMediaPipe:
     @classmethod
