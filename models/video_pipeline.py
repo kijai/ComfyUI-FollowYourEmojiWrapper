@@ -12,14 +12,6 @@ from transformers import CLIPImageProcessor
 
 from ..diffusers import DiffusionPipeline
 from ..diffusers.image_processor import VaeImageProcessor
-from ..diffusers.schedulers import (
-    DDIMScheduler,
-    DPMSolverMultistepScheduler,
-    EulerAncestralDiscreteScheduler,
-    EulerDiscreteScheduler,
-    LMSDiscreteScheduler,
-    PNDMScheduler,
-)
 from ..diffusers.utils import BaseOutput, is_accelerate_available
 from ..diffusers.utils.torch_utils import randn_tensor
 
@@ -43,52 +35,25 @@ class VideoPipeline(DiffusionPipeline):
         referencenet,
         unet,
         lmk_guider,
-        scheduler: Union[
-            DDIMScheduler,
-            PNDMScheduler,
-            LMSDiscreteScheduler,
-            EulerDiscreteScheduler,
-            EulerAncestralDiscreteScheduler,
-            DPMSolverMultistepScheduler,
-        ],
         image_proj_model=None,
         tokenizer=None,
         text_encoder=None
     ):
         super().__init__()
 
-        # self.register_modules(
-        #     vae=vae,
-        #     image_encoder=image_encoder,
-        #     referencenet=referencenet,
-        #     unet=unet,
-        #     lmk_guider=lmk_guider,
-        #     scheduler=scheduler,
-        #     image_proj_model=image_proj_model,
-        #     tokenizer=tokenizer,
-        #     text_encoder=text_encoder,
-        # )
-
         self.vae=vae
         self.image_encoder=image_encoder
         self.referencenet=referencenet
         self.unet=unet
         self.lmk_guider=lmk_guider
-        self.scheduler=scheduler
         self.image_proj_model=image_proj_model
         self.tokenizer=tokenizer
         self.text_encoder=text_encoder
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
+        self.vae_scale_factor = 8
+        self.vae_scaling_factor = 0.18215
         self.clip_image_processor = CLIPImageProcessor()
-        self.ref_image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True)
         self.cond_image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=False)
-
-    def enable_vae_slicing(self):
-        self.vae.enable_slicing()
-
-    def disable_vae_slicing(self):
-        self.vae.disable_slicing()
 
     def enable_sequential_cpu_offload(self, gpu_id=0):
         if is_accelerate_available():
@@ -113,21 +78,7 @@ class VideoPipeline(DiffusionPipeline):
                 and module._hf_hook.execution_device is not None
             ):
                 return torch.device(module._hf_hook.execution_device)
-        return self.device
-
-    def decode_latents(self, latents):
-        video_length = latents.shape[2]
-        latents = 1. / self.vae.config.scaling_factor * latents
-        latents = rearrange(latents, "b c f h w -> (b f) c h w")
-        video = []
-        for frame_idx in tqdm(range(latents.shape[0])):
-            video.append(self.vae.decode(latents[frame_idx : frame_idx + 1]).sample)
-        video = torch.cat(video)
-        video = rearrange(video, "(b f) c h w -> b c f h w", f=video_length)
-        video = (video / 2 + 0.5).clamp(0, 1)
-        # we always cast to float32 as this does not cause significant overhead and is compatible with bfloa16
-        video = video.cpu().float().numpy()
-        return video
+        return self.device 
 
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
@@ -186,114 +137,6 @@ class VideoPipeline(DiffusionPipeline):
         latents = latents * self.scheduler.init_noise_sigma
         return latents
 
-    def _encode_prompt(
-        self,
-        prompt,
-        device,
-        num_videos_per_prompt,
-        do_classifier_free_guidance,
-        negative_prompt,
-    ):
-        batch_size = len(prompt) if isinstance(prompt, list) else 1
-
-        text_inputs = self.tokenizer(
-            prompt,
-            padding="max_length",
-            max_length=self.tokenizer.model_max_length,
-            truncation=True,
-            return_tensors="pt",
-        )
-        text_input_ids = text_inputs.input_ids
-        untruncated_ids = self.tokenizer(
-            prompt, padding="longest", return_tensors="pt"
-        ).input_ids
-
-        if untruncated_ids.shape[-1] >= text_input_ids.shape[-1] and not torch.equal(
-            text_input_ids, untruncated_ids
-        ):
-            removed_text = self.tokenizer.batch_decode(
-                untruncated_ids[:, self.tokenizer.model_max_length - 1 : -1]
-            )
-
-        if (
-            hasattr(self.text_encoder.config, "use_attention_mask")
-            and self.text_encoder.config.use_attention_mask
-        ):
-            attention_mask = text_inputs.attention_mask.to(device)
-        else:
-            attention_mask = None
-
-        text_embeddings = self.text_encoder(
-            text_input_ids.to(device),
-            attention_mask=attention_mask,
-        )
-        text_embeddings = text_embeddings[0]
-
-        # duplicate text embeddings for each generation per prompt, using mps friendly method
-        bs_embed, seq_len, _ = text_embeddings.shape
-        text_embeddings = text_embeddings.repeat(1, num_videos_per_prompt, 1)
-        text_embeddings = text_embeddings.view(
-            bs_embed * num_videos_per_prompt, seq_len, -1
-        )
-
-        # get unconditional embeddings for classifier free guidance
-        if do_classifier_free_guidance:
-            uncond_tokens: List[str]
-            if negative_prompt is None:
-                uncond_tokens = [""] * batch_size
-            elif type(prompt) is not type(negative_prompt):
-                raise TypeError(
-                    f"`negative_prompt` should be the same type to `prompt`, but got {type(negative_prompt)} !="
-                    f" {type(prompt)}."
-                )
-            elif isinstance(negative_prompt, str):
-                uncond_tokens = [negative_prompt]
-            elif batch_size != len(negative_prompt):
-                raise ValueError(
-                    f"`negative_prompt`: {negative_prompt} has batch size {len(negative_prompt)}, but `prompt`:"
-                    f" {prompt} has batch size {batch_size}. Please make sure that passed `negative_prompt` matches"
-                    " the batch size of `prompt`."
-                )
-            else:
-                uncond_tokens = negative_prompt
-
-            max_length = text_input_ids.shape[-1]
-            uncond_input = self.tokenizer(
-                uncond_tokens,
-                padding="max_length",
-                max_length=max_length,
-                truncation=True,
-                return_tensors="pt",
-            )
-
-            if (
-                hasattr(self.text_encoder.config, "use_attention_mask")
-                and self.text_encoder.config.use_attention_mask
-            ):
-                attention_mask = uncond_input.attention_mask.to(device)
-            else:
-                attention_mask = None
-
-            uncond_embeddings = self.text_encoder(
-                uncond_input.input_ids.to(device),
-                attention_mask=attention_mask,
-            )
-            uncond_embeddings = uncond_embeddings[0]
-
-            # duplicate unconditional embeddings for each generation per prompt, using mps friendly method
-            seq_len = uncond_embeddings.shape[1]
-            uncond_embeddings = uncond_embeddings.repeat(1, num_videos_per_prompt, 1)
-            uncond_embeddings = uncond_embeddings.view(
-                batch_size * num_videos_per_prompt, seq_len, -1
-            )
-
-            # For classifier free guidance, we need to do two forward passes.
-            # Here we concatenate the unconditional and text embeddings into a single batch
-            # to avoid doing two forward passes
-            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-
-        return text_embeddings
-
     def interpolate_latents(
         self, latents: torch.Tensor, interpolation_factor: int, device
     ):
@@ -350,6 +193,7 @@ class VideoPipeline(DiffusionPipeline):
         video_length,
         num_inference_steps,
         guidance_scale,
+        scheduler,
         num_images_per_prompt=1,
         eta: float = 0.0,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
@@ -376,17 +220,12 @@ class VideoPipeline(DiffusionPipeline):
         do_classifier_free_guidance = guidance_scale > 1.0
 
         # Prepare timesteps
+        self.scheduler = scheduler
         self.scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = self.scheduler.timesteps
 
         batch_size = 1
         latent_timesteps = timesteps[0].repeat(batch_size)
-
-        # Prepare clip image embeds
-        # clip_image_embeds = self.image_encoder(
-        #     clip_image.to(device, dtype=self.image_encoder.dtype)
-        # ).image_embeds
-        # encoder_hidden_states = clip_image_embeds.unsqueeze(1)
 
         clip_image = clip_image.unsqueeze(0)
         encoder_hidden_states = self.image_encoder(
@@ -424,7 +263,7 @@ class VideoPipeline(DiffusionPipeline):
 
             ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
             ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
-        ref_image_latents = ref_image_latents * self.vae.config.scaling_factor  # (b, 4, h, w)
+        ref_image_latents = ref_image_latents * self.vae_scaling_factor  # (b, 4, h, w)
 
         # Prepare a list of lmk condition images
         lmk_cond_tensor_list = []
@@ -554,17 +393,7 @@ class VideoPipeline(DiffusionPipeline):
         if interpolation_factor > 0:
             latents = self.interpolate_latents(latents, interpolation_factor, device)
 
-        # Post-processing
-        #images = self.decode_latents(latents)  # (b, c, f, h, w)
-
-        # Convert to tensor
-       # if output_type == "tensor":
-        #    images = torch.from_numpy(images)
-
-        #if not return_dict:
-       #     return images
         return latents
-        #return VideoPipelineOutput(videos=images)
 
     def _gaussian_weights(self, t_tile_length, t_batch_size):
         from numpy import pi, exp, sqrt
@@ -587,6 +416,7 @@ class VideoPipeline(DiffusionPipeline):
         video_length,
         num_inference_steps,
         guidance_scale,
+        scheduler,
         num_images_per_prompt=1,
         eta: float = 0.0,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
@@ -659,7 +489,7 @@ class VideoPipeline(DiffusionPipeline):
 
             ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
             ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
-        ref_image_latents = ref_image_latents * self.vae.config.scaling_factor  # (b, 4, h, w)
+        ref_image_latents = ref_image_latents * self.vae_scaling_factor  # (b, 4, h, w)
 
         # Prepare a list of lmk condition images
         lmk_cond_tensor_list = []
@@ -775,18 +605,7 @@ class VideoPipeline(DiffusionPipeline):
 
         # ---------------------------------------------
 
-        # Post-processing
-        #images = self.decode_latents(latents)  # (b, c, f, h, w)
-
-        # Convert to tensor
-        #if output_type == "tensor":
-        #    images = torch.from_numpy(images)
-
-        #if not return_dict:
-        #    return images
-
         return latents
-        #return VideoPipelineOutput(videos=images)
 
     def get_timesteps(self, num_inference_steps):
         # get the original timestep using init_timestep

@@ -21,7 +21,7 @@ from .media_pipe import FaceMeshAlign
 import cv2
 
 from transformers import CLIPVisionModelWithProjection
-from .diffusers import AutoencoderKL, DDIMScheduler
+from .diffusers import AutoencoderKL, DDIMScheduler, DPMSolverMultistepScheduler, UniPCMultistepScheduler, DEISMultistepScheduler, DDPMScheduler
 
 from contextlib import nullcontext
 try:
@@ -89,12 +89,10 @@ class DownloadAndLoadFYEModel:
 
             snapshot_download(
                 repo_id="lambdalabs/sd-image-variations-diffusers",
-                ignore_patterns=["*safety_checker*", "*unet*", "*vae*"],
+                allow_patterns=["*image_encoder*"],
                 local_dir=model_path,
                 local_dir_use_symlinks=False,
             )
-
-        vae = AutoencoderKL.from_pretrained(model_path, subfolder="vae").to(dtype).to(device)
 
         pbar.update(1)
 
@@ -161,12 +159,12 @@ class DownloadAndLoadFYEModel:
 
         noise_scheduler = DDIMScheduler(**scheduler_config)
 
-        pipeline = VideoPipeline(vae=vae,
+        pipeline = VideoPipeline(
+                             vae=None,
                              image_encoder=image_encoder,
                              referencenet=referencenet,
                              unet=ad_unet,
-                             lmk_guider=lmk_guider,
-                             scheduler=noise_scheduler)
+                             lmk_guider=lmk_guider)
 
         return (pipeline,)
 
@@ -186,7 +184,17 @@ class FYESampler:
             "context_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
             "context_stride": ("INT", {"default": 1, "min": 1, "max": 8}),
             "latent_interpolation_factor": ("INT", {"default": 1, "min": 1, "max": 10}),
-            "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01})
+            "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "scheduler": (
+                [
+                    'DDIMScheduler',
+                    'DDPMScheduler',
+                    'DEISMultistepScheduler',
+                    'DPMSolverMultistepScheduler',
+                    'UniPCMultistepScheduler',
+                ], {
+                    "default": 'DDIMScheduler'
+                }),
             }
         }
 
@@ -195,9 +203,9 @@ class FYESampler:
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor, pose_multiplier):
+    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor, pose_multiplier, scheduler):
 
-        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image = common_process(pipeline, ref_latent, motions, steps, seed, clip_image)
+        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image, noise_scheduler = common_process(pipeline, ref_latent, motions, steps, seed, clip_image, scheduler)
 
         latents = pipeline(
                         ref_image=None,
@@ -214,14 +222,47 @@ class FYESampler:
                         context_overlap=context_overlap,
                         context_stride=context_stride,
                         interpolation_factor=latent_interpolation_factor,
-                        pose_multiplier=pose_multiplier
+                        pose_multiplier=pose_multiplier,
+                        scheduler=noise_scheduler
                         )
 
         latents = latents.squeeze(0).permute(1,0,2,3) / 0.18215
        
         return({"samples":latents},)
     
-def common_process(pipeline, ref_latent, motions, steps, seed, clip_image):
+def common_process(pipeline, ref_latent, motions, steps, seed, clip_image, scheduler):
+
+    scheduler_config = {
+            "num_train_timesteps": 1000,
+            "beta_start": 0.00085,
+            "beta_end": 0.012,
+            "beta_schedule": "scaled_linear",
+            "steps_offset": 1,
+            "clip_sample": False,
+            "rescale_betas_zero_snr":True,
+            "prediction_type": "v_prediction",
+            "timestep_spacing": "trailing",
+        }
+     
+    if scheduler == 'DDIMScheduler':
+        noise_scheduler = DDIMScheduler(**scheduler_config)
+    elif scheduler == 'DDPMScheduler':
+        noise_scheduler = DDPMScheduler(**scheduler_config)
+    elif scheduler == 'DEISMultistepScheduler':
+        scheduler_config.pop("clip_sample", None)
+        scheduler_config.pop("rescale_betas_zero_snr", None)
+        noise_scheduler = DEISMultistepScheduler(**scheduler_config)
+    elif scheduler == 'DPMSolverMultistepScheduler':
+        scheduler_config.pop("clip_sample", None)
+        scheduler_config.pop("rescale_betas_zero_snr", None)
+        scheduler_config.update({"algorithm_type": "sde-dpmsolver++"})
+        scheduler_config.update({"use_karras_sigmas": "True"})
+        noise_scheduler = DPMSolverMultistepScheduler(**scheduler_config)
+    elif scheduler == 'UniPCMultistepScheduler':
+        scheduler_config.pop("clip_sample", None)
+        scheduler_config.pop("rescale_betas_zero_snr", None)
+        noise_scheduler = UniPCMultistepScheduler(**scheduler_config)
+        
     device = mm.get_torch_device()
     dtype = pipeline.unet.dtype
 
@@ -237,7 +278,7 @@ def common_process(pipeline, ref_latent, motions, steps, seed, clip_image):
 
     generator = torch.Generator(device=device)
     generator.manual_seed(seed)
-    return (pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image[0])
+    return (pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image[0], noise_scheduler)
 
 class FYESamplerLong:
     @classmethod
@@ -252,7 +293,17 @@ class FYESamplerLong:
             "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
             "t_tile_length": ("INT", {"default": 16, "min": 8, "max": 256}),
             "t_tile_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
-            "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01})
+            "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "scheduler": (
+                [
+                    'DDIMScheduler',
+                    'DDPMScheduler',
+                    'DEISMultistepScheduler',
+                    'DPMSolverMultistepScheduler',
+                    'UniPCMultistepScheduler',
+                ], {
+                    "default": 'DDIMScheduler'
+                }),
             },
         }
 
@@ -261,9 +312,9 @@ class FYESamplerLong:
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap, pose_multiplier):
+    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap, pose_multiplier, scheduler):
       
-        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image = common_process(pipeline, ref_latent, motions, steps, seed, clip_image)
+        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image, noise_scheduler = common_process(pipeline, ref_latent, motions, steps, seed, clip_image, scheduler)
 
         latents = pipeline.forward_long(
                         ref_image=None,
@@ -278,7 +329,8 @@ class FYESamplerLong:
                         clip_image=clip_image,
                         t_tile_length=t_tile_length,
                         t_tile_overlap=t_tile_overlap,
-                        pose_multiplier=pose_multiplier
+                        pose_multiplier=pose_multiplier,
+                        scheduler=noise_scheduler
                         )
 
         latents = latents.squeeze(0).permute(1,0,2,3) / 0.18215
