@@ -1,4 +1,4 @@
-hugginface_hub
+huggingface_hub
 pillow
 opencv-python
 mediapipe
