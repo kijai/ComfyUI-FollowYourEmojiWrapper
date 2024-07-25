@@ -21,8 +21,8 @@ from .media_pipe import FaceMeshAlign
 import cv2
 
 from transformers import CLIPVisionModelWithProjection
-from .diffusers import AutoencoderKL, DDIMScheduler, DPMSolverMultistepScheduler, UniPCMultistepScheduler, DEISMultistepScheduler, DDPMScheduler
-
+from .diffusers import DDIMScheduler, DPMSolverMultistepScheduler, UniPCMultistepScheduler, DEISMultistepScheduler, DDPMScheduler
+  
 from contextlib import nullcontext
 try:
     from accelerate import init_empty_weights
@@ -101,20 +101,19 @@ class DownloadAndLoadFYEModel:
         pbar.update(1)
 
         ref_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "unet_config.json"))
-        ad_unet = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))
-        with (init_empty_weights() if is_accelerate_available else nullcontext()):
-            referencenet = ReferenceNet2DConditionModel(**ref_unet_config)
-            ad_unet = UNet3DConditionModel(**ad_unet)
-        
-        pbar.update(1)
-       
-        lmk_guider = Guider(conditioning_embedding_channels=320, block_out_channels=(16, 32, 96, 256)).to(dtype).to(device)
-
+        ad_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))
         fye_base_path = os.path.join(folder_paths.models_dir, 'FYE')
         referencenet_path = os.path.join(fye_base_path, 'FYE_referencenet-fp16.safetensors')
         unet_path = os.path.join(fye_base_path, 'FYE_unet-fp16.safetensors')
         lmk_guider_path = os.path.join(fye_base_path, 'FYE_lmk_guider.safetensors')
 
+        with (init_empty_weights() if is_accelerate_available else nullcontext()):
+            referencenet = ReferenceNet2DConditionModel(**ref_unet_config)
+            ad_unet = UNet3DConditionModel(**ad_unet_config)
+        
+        pbar.update(1)
+       
+       
         if not os.path.exists(fye_base_path):
             log.info(f"Downloading model to: {fye_base_path}")
             from huggingface_hub import snapshot_download
@@ -139,8 +138,11 @@ class DownloadAndLoadFYEModel:
         else:
             ad_unet.load_state_dict(sd, strict=False)
             ad_unet.to(dtype).to(device)
+
+        
         
         sd = comfy.utils.load_torch_file(lmk_guider_path)
+        lmk_guider = Guider(conditioning_embedding_channels=320, block_out_channels=(16, 32, 96, 256)).to(dtype).to(device)
         lmk_guider.load_state_dict(sd)
 
         pbar.update(1)
