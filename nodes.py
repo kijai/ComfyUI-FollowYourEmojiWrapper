@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.nn as nn
 import torchvision.transforms as T
 import folder_paths
 import comfy.model_management as mm
@@ -185,10 +186,15 @@ class FYEClipEmbedToComfy:
     CATEGORY = "FollowYourEmojiWrapper"
 
     def embed(self, clip_embeds, strength):
+        clip_fc_path = os.path.join(script_directory, "models","FYE_clip_fc.safetensors")
+        sd = comfy.utils.load_torch_file(clip_fc_path)
+        self.clip_fc = nn.Linear(1024, 768, bias=True).to(clip_embeds.dtype).to(clip_embeds.device)
+        self.clip_fc.load_state_dict(sd)
+
         clip_in = clip_embeds * strength
-        
+        clip_out = self.clip_fc(clip_in)
            
-        return ([[clip_in, {"pooled_output": clip_in}]], )
+        return ([[clip_out, {"pooled_output": clip_out}]], )
 
 class FYELandmarkEncode:
     @classmethod
