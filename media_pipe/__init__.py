@@ -46,8 +46,9 @@ def smooth_pose_seq(pose_seq, window_size=5):
 
 class FaceMeshAlign():
 
-    def __init__(self):
-        self.vis = FaceMeshVisualizer(forehead_edge=False, iris_edge=False, iris_point=True)
+    def __init__(self, vis):
+        #self.vis = FaceMeshVisualizer(forehead_edge=False, iris_edge=False, iris_point=True)
+        self.vis = vis
 
     def _scale_iris(self, lmks, verts):
         r_iris_ids = [468, 469, 470, 471, 472]

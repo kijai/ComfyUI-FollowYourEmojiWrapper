@@ -191,8 +191,9 @@ class FYEClipEmbedToComfy:
         self.clip_fc = nn.Linear(1024, 768, bias=True).to(clip_embeds.dtype).to(clip_embeds.device)
         self.clip_fc.load_state_dict(sd)
 
-        clip_in = clip_embeds * strength
-        clip_out = self.clip_fc(clip_in)
+        clip_in = clip_embeds
+        clip_out = self.clip_fc(clip_in) * strength
+        clip_out = clip_out.to('cpu')
            
         return ([[clip_out, {"pooled_output": clip_out}]], )
 
@@ -475,7 +476,7 @@ class FYEMediaPipe:
        
         lmk_extractor = LMKExtractor()
         vis = FaceMeshVisualizer(forehead_edge=False, iris_point=draw_iris_points, draw_outer_lips=draw_outer_lips)
-        aligner = FaceMeshAlign()
+        aligner = FaceMeshAlign(vis)
 
         to_tensor = T.ToTensor()
         
