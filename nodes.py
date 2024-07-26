@@ -20,7 +20,6 @@ from .media_pipe.draw_util import FaceMeshVisualizer
 from .media_pipe import FaceMeshAlign
 import cv2
 
-from transformers import CLIPVisionModelWithProjection
 from .diffusers import DDIMScheduler, DPMSolverMultistepScheduler, UniPCMultistepScheduler, DEISMultistepScheduler, DDPMScheduler
   
 from contextlib import nullcontext
@@ -68,8 +67,8 @@ class DownloadAndLoadFYEModel:
             },
         }
 
-    RETURN_TYPES = ("FYEPIPE",)
-    RETURN_NAMES = ("fye_pipe",)
+    RETURN_TYPES = ("FYEPIPE", "CLIP_VISION",)
+    RETURN_NAMES = ("fye_pipe", "clip_vision",)
     FUNCTION = "loadmodel"
     CATEGORY = "FollowYourEmojiWrapper"
 
@@ -81,32 +80,13 @@ class DownloadAndLoadFYEModel:
 
         pbar = comfy.utils.ProgressBar(3)
 
-        model_path = os.path.join(folder_paths.models_dir, "diffusers", "sd-image-variations-diffusers")
-
-        if not os.path.exists(model_path):
-            log.info(f"Downloading model to: {model_path}")
-            from huggingface_hub import snapshot_download
-
-            snapshot_download(
-                repo_id="lambdalabs/sd-image-variations-diffusers",
-                allow_patterns=["*image_encoder*"],
-                local_dir=model_path,
-                local_dir_use_symlinks=False,
-            )
-
         ref_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "unet_config.json"))
-        ad_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))
-        #image_encoder_config = OmegaConf.load(os.path.join(script_directory, "configs", "image_encoder_config.json"))
+        ad_unet_config = OmegaConf.load(os.path.join(script_directory, "configs", "3d_unet_config.json"))        
 
         fye_base_path = os.path.join(folder_paths.models_dir, "FYE")
         referencenet_path = os.path.join(fye_base_path, "FYE_referencenet-fp16.safetensors")
         unet_path = os.path.join(fye_base_path, "FYE_unet-fp16.safetensors")
         lmk_guider_path = os.path.join(fye_base_path, "FYE_lmk_guider.safetensors")
-        #image_encoder_path = os.path.join(fye_base_path, "sd-image-variations-encoder-fp16.safetensors")
-
-        pbar.update(1)
-
-        image_encoder = CLIPVisionModelWithProjection.from_pretrained(model_path, subfolder="image_encoder").to(dtype).to(device)
 
         pbar.update(1)
 
@@ -114,16 +94,15 @@ class DownloadAndLoadFYEModel:
             referencenet = ReferenceNet2DConditionModel(**ref_unet_config)
             ad_unet = UNet3DConditionModel(**ad_unet_config)
            
-        
         pbar.update(1)
-       
-       
+              
         if not os.path.exists(fye_base_path):
             log.info(f"Downloading model to: {fye_base_path}")
             from huggingface_hub import snapshot_download
 
             snapshot_download(
                 repo_id="Kijai/FollowYourEmoji-safetensors",
+                ignore_patterns=["*sd-image-variations-encoder-fp16.safetensors", "fye_motion_module-fp16.safetensors"],
                 local_dir=fye_base_path,
                 local_dir_use_symlinks=False,
             )
@@ -146,16 +125,6 @@ class DownloadAndLoadFYEModel:
             ad_unet.load_state_dict(sd, strict=False)
             ad_unet.to(dtype).to(device)
 
-        pbar.update(1)
-        # #image encoder
-        # sd = comfy.utils.load_torch_file(image_encoder_path)
-        # if is_accelerate_available:
-        #     for key in sd:
-        #         set_module_tensor_to_device(image_encoder, key, device=device, dtype=dtype, value=sd[key])
-        # else:
-        #     image_encoder.load_state_dict(sd, strict=False)
-        #     image_encoder.to(dtype).to(device)
-
         #guider
         sd = comfy.utils.load_torch_file(lmk_guider_path)
         lmk_guider = Guider(conditioning_embedding_channels=320, block_out_channels=(16, 32, 96, 256)).to(dtype).to(device)
@@ -163,37 +132,61 @@ class DownloadAndLoadFYEModel:
 
         pbar.update(1)
 
-        scheduler_config = {
-            "num_train_timesteps": 1000,
-            "beta_start": 0.00085,
-            "beta_end": 0.012,
-            "beta_schedule": "scaled_linear",
-            "steps_offset": 1,
-            "clip_sample": False,
-            "rescale_betas_zero_snr":True,
-            "prediction_type": "v_prediction",
-            "timestep_spacing": "trailing",
-        }
+        clip_vision_model_path = os.path.join(folder_paths.models_dir, "clip_vision", "sd-image-variations-encoder-fp16.safetensors")
+        if not os.path.exists(clip_vision_model_path):
+            print(f"Downloading model to: {clip_vision_model_path}")
+            from huggingface_hub import hf_hub_download             
+            hf_hub_download(repo_id="Kijai/FollowYourEmoji-safetensors", 
+                                filename = "sd-image-variations-encoder-fp16.safetensors",
+                                local_dir = os.path.join(folder_paths.models_dir, "clip_vision"), 
+                                local_dir_use_symlinks=False)
 
-        noise_scheduler = DDIMScheduler(**scheduler_config)
+        clip_vision = comfy.clip_vision.load(clip_vision_model_path)
+
+        print(f"Loading model from: {clip_vision_model_path}")
 
         pipeline = VideoPipeline(
                              vae=None,
-                             image_encoder=image_encoder,
+                             image_encoder=None,
                              referencenet=referencenet,
                              unet=ad_unet,
                              lmk_guider=lmk_guider)
 
-        return (pipeline,)
+        return (pipeline, clip_vision,)
 
 
+
+
+class FYECLIPEncode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {"required": {
+            "clip_vision": ("CLIP_VISION", ),
+            "clip_image": ("IMAGE",),
+            "strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            }
+        }
+
+    RETURN_TYPES = ("FYECLIPEMBED",)
+    RETURN_NAMES = ("clip_embeds",)
+    FUNCTION = "encode"
+    CATEGORY = "FollowYourEmojiWrapper"
+
+    def encode(self, clip_vision, clip_image, strength):
+        dtype=clip_vision.dtype
+        device=mm.get_torch_device()
+        clip_image = clip_preprocess(clip_image.clone(), 224)
+        clip_embeds = clip_vision.encode_image(clip_image.permute(0, 2, 3, 1))["last_hidden_state"].to(dtype).to(device)
+        clip_embeds = clip_embeds * strength
+        return(clip_embeds,)
+    
 class FYESampler:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
             "pipeline": ("FYEPIPE",),
+            "clip_embeds": ("FYECLIPEMBED", ),
             "ref_latent": ("LATENT", ),
-            "clip_image": ("IMAGE",),
             "motions": ("IMAGE",),
             "steps": ("INT", {"default": 25, "min": 1}),
             "cfg": ("FLOAT", {"default": 3.5, "min": 0.0, "max": 30.0, "step": 0.01}),
@@ -203,6 +196,9 @@ class FYESampler:
             "context_stride": ("INT", {"default": 1, "min": 1, "max": 8}),
             "latent_interpolation_factor": ("INT", {"default": 1, "min": 1, "max": 10}),
             "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "ref_down_block_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "ref_mid_block_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "ref_up_block_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
             "scheduler": (
                 [
                     'DDIMScheduler',
@@ -221,13 +217,15 @@ class FYESampler:
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, context_frames, context_overlap, context_stride, latent_interpolation_factor, pose_multiplier, scheduler):
+    def process(self, pipeline, clip_embeds, ref_latent, motions, steps, seed, cfg, context_frames, context_overlap, 
+                context_stride, latent_interpolation_factor, pose_multiplier, scheduler, ref_down_block_multiplier, ref_mid_block_multiplier, ref_up_block_multiplier):
 
-        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image, noise_scheduler = common_process(pipeline, ref_latent, motions, steps, seed, clip_image, scheduler)
+        ref_sample, lmk_images, H, W, generator, noise_scheduler = common_process(pipeline, ref_latent, motions, seed, scheduler)
 
         latents = pipeline(
                         ref_image=None,
                         ref_image_latents=ref_sample,
+                        cond_images=clip_embeds,
                         lmk_images=lmk_images,
                         width=W,
                         height=H,
@@ -235,20 +233,22 @@ class FYESampler:
                         num_inference_steps=steps,
                         guidance_scale=cfg,
                         generator=generator,
-                        clip_image=clip_image,
                         context_frames=context_frames,
                         context_overlap=context_overlap,
                         context_stride=context_stride,
                         interpolation_factor=latent_interpolation_factor,
                         pose_multiplier=pose_multiplier,
-                        scheduler=noise_scheduler
+                        scheduler=noise_scheduler,
+                        ref_down_block_multiplier=ref_down_block_multiplier,
+                        ref_mid_block_multiplier=ref_mid_block_multiplier,
+                        ref_up_block_multiplier=ref_up_block_multiplier
                         )
 
         latents = latents.squeeze(0).permute(1,0,2,3) / 0.18215
        
         return({"samples":latents},)
     
-def common_process(pipeline, ref_latent, motions, steps, seed, clip_image, scheduler):
+def common_process(pipeline, ref_latent, motions, seed, scheduler):
 
     scheduler_config = {
             "num_train_timesteps": 1000,
@@ -292,19 +292,17 @@ def common_process(pipeline, ref_latent, motions, steps, seed, clip_image, sched
     motions = (motions * 255).cpu().numpy().astype(np.uint8)
     lmk_images = [Image.fromarray(motion) for motion in motions]
 
-    clip_image = clip_preprocess(clip_image.clone(), 224)
-
     generator = torch.Generator(device=device)
     generator.manual_seed(seed)
-    return (pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image[0], noise_scheduler)
+    return (ref_sample, lmk_images, H, W, generator, noise_scheduler)
 
 class FYESamplerLong:
     @classmethod
     def INPUT_TYPES(s):
         return {"required": {
             "pipeline": ("FYEPIPE",),
+            "clip_embeds": ("FYECLIPEMBED", ),
             "ref_latent": ("LATENT", ),
-            "clip_image": ("IMAGE",),
             "motions": ("IMAGE",),
             "steps": ("INT", {"default": 25, "min": 1}),
             "cfg": ("FLOAT", {"default": 3.5, "min": 0.0, "max": 30.0, "step": 0.01}),
@@ -312,6 +310,9 @@ class FYESamplerLong:
             "t_tile_length": ("INT", {"default": 16, "min": 8, "max": 256}),
             "t_tile_overlap": ("INT", {"default": 4, "min": 1, "max": 24}),
             "pose_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "ref_down_block_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "ref_mid_block_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
+            "ref_up_block_multiplier": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01}),
             "scheduler": (
                 [
                     'DDIMScheduler',
@@ -330,25 +331,29 @@ class FYESamplerLong:
     FUNCTION = "process"
     CATEGORY = "FollowYourEmojiWrapper"
 
-    def process(self, pipeline, ref_latent, motions, steps, seed, clip_image, cfg, t_tile_length, t_tile_overlap, pose_multiplier, scheduler):
+    def process(self, pipeline, clip_embeds, ref_latent, motions, steps, seed, cfg, t_tile_length, t_tile_overlap, 
+                pose_multiplier, scheduler, ref_down_block_multiplier, ref_mid_block_multiplier, ref_up_block_multiplier):
       
-        pipeline, ref_sample, lmk_images, H, W, steps, generator, clip_image, noise_scheduler = common_process(pipeline, ref_latent, motions, steps, seed, clip_image, scheduler)
+        ref_sample, lmk_images, H, W, generator, noise_scheduler = common_process(pipeline, ref_latent, motions, seed, scheduler)
 
         latents = pipeline.forward_long(
                         ref_image=None,
                         ref_image_latents=ref_sample,
                         lmk_images=lmk_images,
+                        cond_images=clip_embeds,
                         width=W,
                         height=H,
                         video_length=len(motions),
                         num_inference_steps=steps,
                         guidance_scale=cfg,
                         generator=generator,
-                        clip_image=clip_image,
                         t_tile_length=t_tile_length,
                         t_tile_overlap=t_tile_overlap,
                         pose_multiplier=pose_multiplier,
-                        scheduler=noise_scheduler
+                        scheduler=noise_scheduler,
+                        ref_down_block_multiplier=ref_down_block_multiplier,
+                        ref_mid_block_multiplier=ref_mid_block_multiplier,
+                        ref_up_block_multiplier=ref_up_block_multiplier
                         )
 
         latents = latents.squeeze(0).permute(1,0,2,3) / 0.18215
@@ -429,11 +434,125 @@ NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadFYEModel": DownloadAndLoadFYEModel,
     "FYESampler": FYESampler,
     "FYEMediaPipe": FYEMediaPipe,
-    "FYESamplerLong": FYESamplerLong
+    "FYESamplerLong": FYESamplerLong,
+    "FYECLIPEncode": FYECLIPEncode
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadFYEModel": "(Down)LoadFYE Model",
     "FYESampler": "FYESampler",
     "FYEMediaPipe": "MediaPipe",
-    "FYESamplerLong": "FYESamplerLong"
+    "FYESamplerLong": "FYESamplerLong",
+    "FYECLIPEncode": "FYECLIPEncode"
     }
+
+def split_tiles(x, num_split):
+    _, H, W, _ = x.shape
+    h, w = H // num_split, W // num_split
+    x_split = torch.cat([x[:, i*h:(i+1)*h, j*w:(j+1)*w, :] for i in range(num_split) for j in range(num_split)], dim=0)    
+
+    return x_split
+
+def merge_hiddenstates(embeds):
+    num_tiles = embeds.shape[0]
+    tile_size = int((embeds.shape[1]-1) ** 0.5)
+    grid_size = int(num_tiles ** 0.5)
+
+    # Extract class tokens
+    class_tokens = embeds[:, 0, :]  # Save class tokens: [num_tiles, embeds[-1]]
+    avg_class_token = class_tokens.mean(dim=0, keepdim=True).unsqueeze(0)  # Average token, shape: [1, 1, embeds[-1]]
+
+    patch_embeds = embeds[:, 1:, :]  # Shape: [num_tiles, tile_size^2, embeds[-1]]
+    reshaped = patch_embeds.reshape(grid_size, grid_size, tile_size, tile_size, embeds.shape[-1])
+
+    merged = torch.cat([torch.cat([reshaped[i, j] for j in range(grid_size)], dim=1) 
+                        for i in range(grid_size)], dim=0)
+
+    merged = merged.unsqueeze(0)  # Shape: [1, grid_size*tile_size, grid_size*tile_size, embeds[-1]]
+
+    # Pool to original size
+    pooled = torch.nn.functional.adaptive_avg_pool2d(merged.permute(0, 3, 1, 2), (tile_size, tile_size)).permute(0, 2, 3, 1)
+    flattened = pooled.reshape(1, tile_size*tile_size, embeds.shape[-1])
+
+    # Add back the class token
+    with_class = torch.cat([avg_class_token, flattened], dim=1)  # Shape: original shape
+
+    return with_class
+
+def merge_embeddings(embeds): # TODO: this needs so much testing that I don't even
+    num_tiles = embeds.shape[0]
+    grid_size = int(num_tiles ** 0.5)
+    tile_size = int(embeds.shape[1] ** 0.5)
+    reshaped = embeds.reshape(grid_size, grid_size, tile_size, tile_size)
+
+    # Merge the tiles
+    merged = torch.cat([torch.cat([reshaped[i, j] for j in range(grid_size)], dim=1) 
+                        for i in range(grid_size)], dim=0)
+
+    merged = merged.unsqueeze(0)  # Shape: [1, grid_size*tile_size, grid_size*tile_size]
+
+    # Pool to original size
+    pooled = torch.nn.functional.adaptive_avg_pool2d(merged, (tile_size, tile_size))  # pool to [1, tile_size, tile_size]
+    pooled = pooled.flatten(1)  # flatten to [1, tile_size^2]
+
+    return pooled
+
+def encode_image_masked(clip_vision, image, mask=None, batch_size=0, tiles=1, ratio=1.0):
+    # full image embeds
+    embeds = encode_image_masked_(clip_vision, image, mask, batch_size)
+    tiles = min(tiles, 16)
+
+    if tiles > 1:
+        # split in tiles
+        image_split = split_tiles(image, tiles)
+
+        # get the embeds for each tile
+        embeds_split = encode_image_masked_(clip_vision, image_split, mask, batch_size)
+
+        embeds_split['last_hidden_state'] = merge_hiddenstates(embeds_split['last_hidden_state'])
+        #embeds_split["image_embeds"] = merge_embeddings(embeds_split["image_embeds"])
+        #embeds_split["penultimate_hidden_states"] = merge_hiddenstates(embeds_split["penultimate_hidden_states"])
+
+        embeds['last_hidden_state'] = torch.cat([embeds['last_hidden_state']*ratio, embeds_split['last_hidden_state']])
+        #embeds['image_embeds'] = torch.cat([embeds['image_embeds']*ratio, embeds_split['image_embeds']])
+        #embeds['penultimate_hidden_states'] = torch.cat([embeds['penultimate_hidden_states']*ratio, embeds_split['penultimate_hidden_states']])
+
+    #del embeds_split
+
+    return embeds
+
+from comfy.clip_vision import clip_preprocess, Output
+
+def encode_image_masked_(clip_vision, image, mask=None, batch_size=0):
+
+    outputs = Output()
+
+    if batch_size == 0:
+        batch_size = image.shape[0]
+    elif batch_size > image.shape[0]:
+        batch_size = image.shape[0]
+
+    image_batch = torch.split(image, batch_size, dim=0)
+
+    for img in image_batch:
+        img = img.to(clip_vision.load_device)
+        pixel_values = clip_preprocess(img).float()
+
+        # TODO: support for multiple masks
+        if mask is not None:
+            pixel_values = pixel_values * mask.to(clip_vision.load_device)
+
+        out = clip_vision.model(pixel_values=pixel_values, intermediate_output=-2)
+
+        if not hasattr(outputs, "last_hidden_state"):
+            outputs["last_hidden_state"] = out[0].to(mm.intermediate_device())
+            outputs["image_embeds"] = out[2].to(mm.intermediate_device())
+            outputs["penultimate_hidden_states"] = out[1].to(mm.intermediate_device())
+        else:
+            outputs["last_hidden_state"] = torch.cat((outputs["last_hidden_state"], out[0].to(mm.intermediate_device())), dim=0)
+            outputs["image_embeds"] = torch.cat((outputs["image_embeds"], out[2].to(mm.intermediate_device())), dim=0)
+            outputs["penultimate_hidden_states"] = torch.cat((outputs["penultimate_hidden_states"], out[1].to(mm.intermediate_device())), dim=0)
+
+    del img, pixel_values, out
+    torch.cuda.empty_cache()
+
+    return outputs

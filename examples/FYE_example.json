@@ -1,6 +1,6 @@
 {
-  "last_node_id": 42,
-  "last_link_id": 132,
+  "last_node_id": 72,
+  "last_link_id": 207,
   "nodes": [
     {
       "id": 15,
@@ -135,109 +135,6 @@
       ]
     },
     {
-      "id": 31,
-      "type": "VAEDecode",
-      "pos": [
-        1312,
-        93
-      ],
-      "size": {
-        "0": 210,
-        "1": 46
-      },
-      "flags": {},
-      "order": 13,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "link": 127
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 92,
-          "slot_index": 1
-        }
-      ],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            121
-          ],
-          "shape": 3,
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VAEDecode"
-      }
-    },
-    {
-      "id": 40,
-      "type": "FYESampler",
-      "pos": [
-        969,
-        271
-      ],
-      "size": {
-        "0": 315,
-        "1": 310
-      },
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "pipeline",
-          "type": "FYEPIPE",
-          "link": 123
-        },
-        {
-          "name": "ref_latent",
-          "type": "LATENT",
-          "link": 126
-        },
-        {
-          "name": "clip_image",
-          "type": "IMAGE",
-          "link": 124
-        },
-        {
-          "name": "motions",
-          "type": "IMAGE",
-          "link": 131
-        }
-      ],
-      "outputs": [
-        {
-          "name": "samples",
-          "type": "LATENT",
-          "links": [
-            127
-          ],
-          "shape": 3
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "FYESampler"
-      },
-      "widgets_values": [
-        25,
-        3.5,
-        0,
-        "fixed",
-        16,
-        4,
-        1,
-        1,
-        1
-      ]
-    },
-    {
       "id": 14,
       "type": "ImageResizeKJ",
       "pos": [
@@ -286,7 +183,7 @@
           "links": [
             43,
             114,
-            124
+            174
           ],
           "shape": 3,
           "slot_index": 0
@@ -368,7 +265,7 @@
         "1": 290.79400634765625
       },
       "flags": {},
-      "order": 8,
+      "order": 9,
       "mode": 0,
       "inputs": [
         {
@@ -393,7 +290,7 @@
         "1": 102
       },
       "flags": {},
-      "order": 9,
+      "order": 10,
       "mode": 0,
       "inputs": [
         {
@@ -516,38 +413,6 @@
       }
     },
     {
-      "id": 30,
-      "type": "DownloadAndLoadFYEModel",
-      "pos": [
-        265,
-        20
-      ],
-      "size": {
-        "0": 315,
-        "1": 58
-      },
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "outputs": [
-        {
-          "name": "fye_pipe",
-          "type": "FYEPIPE",
-          "links": [
-            123
-          ],
-          "shape": 3,
-          "slot_index": 0
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "DownloadAndLoadFYEModel"
-      },
-      "widgets_values": [
-        "fp16"
-      ]
-    },
-    {
       "id": 32,
       "type": "VAELoader",
       "pos": [
@@ -559,7 +424,7 @@
         "1": 58
       },
       "flags": {},
-      "order": 3,
+      "order": 2,
       "mode": 0,
       "outputs": [
         {
@@ -613,83 +478,13 @@
           "name": "LATENT",
           "type": "LATENT",
           "links": [
-            126
+            205
           ],
           "shape": 3
         }
       ],
       "properties": {
         "Node name for S&R": "VAEEncode"
-      }
-    },
-    {
-      "id": 28,
-      "type": "VHS_VideoCombine",
-      "pos": [
-        1637,
-        53
-      ],
-      "size": [
-        640.2998046875,
-        905.5310668945312
-      ],
-      "flags": {},
-      "order": 14,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 121
-        },
-        {
-          "name": "audio",
-          "type": "VHS_AUDIO",
-          "link": null
-        },
-        {
-          "name": "meta_batch",
-          "type": "VHS_BatchManager",
-          "link": null
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "name": "Filenames",
-          "type": "VHS_FILENAMES",
-          "links": null,
-          "shape": 3
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VHS_VideoCombine"
-      },
-      "widgets_values": {
-        "frame_rate": 16,
-        "loop_count": 0,
-        "filename_prefix": "AnimateDiff",
-        "format": "video/h264-mp4",
-        "pix_fmt": "yuv420p",
-        "crf": 19,
-        "save_metadata": true,
-        "pingpong": false,
-        "save_output": false,
-        "videopreview": {
-          "hidden": false,
-          "paused": false,
-          "params": {
-            "filename": "AnimateDiff_00007.mp4",
-            "subfolder": "",
-            "type": "temp",
-            "format": "video/h264-mp4",
-            "frame_rate": 16
-          }
-        }
       }
     },
     {
@@ -704,7 +499,7 @@
         "1": 86
       },
       "flags": {},
-      "order": 10,
+      "order": 11,
       "mode": 0,
       "inputs": [
         {
@@ -718,8 +513,8 @@
           "name": "image",
           "type": "IMAGE",
           "links": [
-            131,
-            132
+            132,
+            206
           ],
           "shape": 3,
           "slot_index": 0
@@ -751,12 +546,12 @@
       "id": 42,
       "type": "VHS_VideoCombine",
       "pos": [
-        709.9892843351707,
-        828.2000359866889
+        710,
+        828
       ],
       "size": [
-        513.2158860992432,
-        720.169766883266
+        513.2158813476562,
+        720.1697623729706
       ],
       "flags": {},
       "order": 12,
@@ -805,7 +600,7 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "AnimateDiff_00008.webp",
+            "filename": "AnimateDiff_00001.webp",
             "subfolder": "",
             "type": "temp",
             "format": "image/webp",
@@ -813,6 +608,270 @@
           }
         }
       }
+    },
+    {
+      "id": 61,
+      "type": "DownloadAndLoadFYEModel",
+      "pos": [
+        265,
+        20
+      ],
+      "size": {
+        "0": 315,
+        "1": 78
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "fye_pipe",
+          "type": "FYEPIPE",
+          "links": [
+            203
+          ],
+          "shape": 3,
+          "slot_index": 0
+        },
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "links": [
+            173
+          ],
+          "shape": 3,
+          "slot_index": 1
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "DownloadAndLoadFYEModel"
+      },
+      "widgets_values": [
+        "fp16"
+      ]
+    },
+    {
+      "id": 31,
+      "type": "VAEDecode",
+      "pos": [
+        1312,
+        93
+      ],
+      "size": {
+        "0": 210,
+        "1": 46
+      },
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 207
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 92,
+          "slot_index": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            202
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAEDecode"
+      }
+    },
+    {
+      "id": 71,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        1550.573114496207,
+        337.28348247197005
+      ],
+      "size": [
+        315,
+        600.5625
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 202
+        },
+        {
+          "name": "audio",
+          "type": "VHS_AUDIO",
+          "link": null
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null,
+          "shape": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 8,
+        "loop_count": 0,
+        "filename_prefix": "AnimateDiff",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "AnimateDiff_00711.mp4",
+            "subfolder": "",
+            "type": "output",
+            "format": "video/h264-mp4",
+            "frame_rate": 8
+          }
+        }
+      }
+    },
+    {
+      "id": 63,
+      "type": "FYECLIPEncode",
+      "pos": [
+        551,
+        317
+      ],
+      "size": {
+        "0": 292.20001220703125,
+        "1": 78
+      },
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "clip_vision",
+          "type": "CLIP_VISION",
+          "link": 173
+        },
+        {
+          "name": "clip_image",
+          "type": "IMAGE",
+          "link": 174,
+          "slot_index": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "clip_embeds",
+          "type": "FYECLIPEMBED",
+          "links": [
+            204
+          ],
+          "shape": 3,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FYECLIPEncode"
+      },
+      "widgets_values": [
+        1
+      ]
+    },
+    {
+      "id": 72,
+      "type": "FYESampler",
+      "pos": [
+        1069,
+        306
+      ],
+      "size": {
+        "0": 315,
+        "1": 406
+      },
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "pipeline",
+          "type": "FYEPIPE",
+          "link": 203
+        },
+        {
+          "name": "clip_embeds",
+          "type": "FYECLIPEMBED",
+          "link": 204
+        },
+        {
+          "name": "ref_latent",
+          "type": "LATENT",
+          "link": 205,
+          "slot_index": 2
+        },
+        {
+          "name": "motions",
+          "type": "IMAGE",
+          "link": 206
+        }
+      ],
+      "outputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "links": [
+            207
+          ],
+          "shape": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FYESampler"
+      },
+      "widgets_values": [
+        25,
+        3.5,
+        419558339226289,
+        "fixed",
+        16,
+        4,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        "DDIMScheduler"
+      ]
     }
   ],
   "links": [
@@ -889,59 +948,11 @@
       "VAE"
     ],
     [
-      121,
-      31,
-      0,
-      28,
-      0,
-      "IMAGE"
-    ],
-    [
-      123,
-      30,
-      0,
-      40,
-      0,
-      "FYEPIPE"
-    ],
-    [
-      124,
-      14,
-      0,
-      40,
-      2,
-      "IMAGE"
-    ],
-    [
-      126,
-      38,
-      0,
-      40,
-      1,
-      "LATENT"
-    ],
-    [
-      127,
-      40,
-      0,
-      31,
-      0,
-      "LATENT"
-    ],
-    [
       130,
       17,
       0,
       41,
       0,
-      "IMAGE"
-    ],
-    [
-      131,
-      41,
-      0,
-      40,
-      3,
       "IMAGE"
     ],
     [
@@ -951,6 +962,70 @@
       42,
       0,
       "IMAGE"
+    ],
+    [
+      173,
+      61,
+      1,
+      63,
+      0,
+      "CLIP_VISION"
+    ],
+    [
+      174,
+      14,
+      0,
+      63,
+      1,
+      "IMAGE"
+    ],
+    [
+      202,
+      31,
+      0,
+      71,
+      0,
+      "IMAGE"
+    ],
+    [
+      203,
+      61,
+      0,
+      72,
+      0,
+      "FYEPIPE"
+    ],
+    [
+      204,
+      63,
+      0,
+      72,
+      1,
+      "FYECLIPEMBED"
+    ],
+    [
+      205,
+      38,
+      0,
+      72,
+      2,
+      "LATENT"
+    ],
+    [
+      206,
+      41,
+      0,
+      72,
+      3,
+      "IMAGE"
+    ],
+    [
+      207,
+      72,
+      0,
+      31,
+      0,
+      "LATENT"
     ]
   ],
   "groups": [],
@@ -959,8 +1034,8 @@
     "ds": {
       "scale": 0.6209213230591553,
       "offset": {
-        "0": 746.9367775795021,
-        "1": 245.96136046716856
+        "0": 353.1928116844256,
+        "1": 273.9303905317604
       }
     }
   },

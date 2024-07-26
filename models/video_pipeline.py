@@ -199,7 +199,7 @@ class VideoPipeline(DiffusionPipeline):
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         output_type: Optional[str] = "tensor",
         return_dict: bool = True,
-        clip_image=None,
+        cond_images=None,
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
         callback_steps: Optional[int] = 1,
         context_schedule="uniform",
@@ -209,6 +209,9 @@ class VideoPipeline(DiffusionPipeline):
         context_batch_size=1,
         interpolation_factor=1,
         pose_multiplier=1.0,
+        ref_down_block_multiplier=1.0,
+        ref_mid_block_multiplier=1.0,
+        ref_up_block_multiplier=1.0,
         **kwargs,
     ):
         # Default height and width to unet
@@ -227,10 +230,7 @@ class VideoPipeline(DiffusionPipeline):
         batch_size = 1
         latent_timesteps = timesteps[0].repeat(batch_size)
 
-        clip_image = clip_image.unsqueeze(0)
-        encoder_hidden_states = self.image_encoder(
-            clip_image.to(device, dtype=self.image_encoder.dtype)
-        ).last_hidden_state
+        encoder_hidden_states = cond_images
         uncond_encoder_hidden_states = torch.zeros_like(encoder_hidden_states)
 
         if do_classifier_free_guidance:
@@ -311,6 +311,10 @@ class VideoPipeline(DiffusionPipeline):
                                           torch.zeros_like(t),
                                           encoder_hidden_states=encoder_hidden_states,
                                           return_dict=False)
+                     #adjust ref unet 
+                    reference_down_block_res_samples = tuple(sample * ref_down_block_multiplier for sample in reference_down_block_res_samples)
+                    reference_mid_block_res_sample = reference_mid_block_res_sample * ref_mid_block_multiplier
+                    reference_up_block_res_samples = tuple(sample * ref_up_block_multiplier for sample in reference_up_block_res_samples)
 
                 context_queue = list(
                     context_scheduler(
@@ -422,7 +426,7 @@ class VideoPipeline(DiffusionPipeline):
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         output_type: Optional[str] = "tensor",
         return_dict: bool = True,
-        clip_image=None,
+        cond_images=None,
         callback: Optional[Callable[[int, int, torch.FloatTensor], None]] = None,
         callback_steps: Optional[int] = 1,
         context_schedule="uniform",
@@ -434,6 +438,9 @@ class VideoPipeline(DiffusionPipeline):
         t_tile_length=16,
         t_tile_overlap=4,
         pose_multiplier=1.0,
+        ref_down_block_multiplier=1.0,
+        ref_mid_block_multiplier=1.0,
+        ref_up_block_multiplier=1.0,
         **kwargs,
     ):
         # Default height and width to unet
@@ -452,16 +459,7 @@ class VideoPipeline(DiffusionPipeline):
         batch_size = 1
         latent_timesteps = timesteps[0].repeat(batch_size)
 
-        # Prepare clip image embeds
-        clip_image = clip_image.unsqueeze(0)
-        clip_image_embeds = self.image_encoder(
-            clip_image.to(device, dtype=self.image_encoder.dtype)
-        ).image_embeds
-        # encoder_hidden_states = clip_image_embeds.unsqueeze(1)
-
-        encoder_hidden_states = self.image_encoder(
-            clip_image.to(device, dtype=self.image_encoder.dtype)
-        ).last_hidden_state
+        encoder_hidden_states = cond_images
         uncond_encoder_hidden_states = torch.zeros_like(encoder_hidden_states)
 
         if do_classifier_free_guidance:
@@ -469,7 +467,7 @@ class VideoPipeline(DiffusionPipeline):
                 [uncond_encoder_hidden_states, encoder_hidden_states], dim=0
             )
 
-        num_channels_latents = self.unet.in_channels
+        num_channels_latents = self.unet.config.in_channels
 
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
@@ -477,7 +475,7 @@ class VideoPipeline(DiffusionPipeline):
             width,
             height,
             video_length,
-            clip_image_embeds.dtype,
+            encoder_hidden_states.dtype,
             device,
             generator)
 
@@ -543,7 +541,12 @@ class VideoPipeline(DiffusionPipeline):
                                 torch.zeros_like(t),
                                 encoder_hidden_states=encoder_hidden_states,
                                 return_dict=False)
-
+                        
+                        #adjust ref unet 
+                        reference_down_block_res_samples = tuple(sample * ref_down_block_multiplier for sample in reference_down_block_res_samples)
+                        reference_mid_block_res_sample = reference_mid_block_res_sample * ref_mid_block_multiplier
+                        reference_up_block_res_samples = tuple(sample * ref_up_block_multiplier for sample in reference_up_block_res_samples)
+                        
                     latents_tile = latents[:, :, input_start_t:input_end_t, :, :]
                     latent_model_input_tile = torch.cat([latents_tile] * 2) if do_classifier_free_guidance else latents_tile
                     # model_input_tile.shape = torch.Size([2, 4, 16, 32, 32])
