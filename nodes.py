@@ -258,8 +258,13 @@ class FYELandmarkToComfy:
 
     def patch(self, model, landmark_features):        
         def input_block_patch(h, transformer_options):
-            if transformer_options["block"][1] == 0:
-                lmk_fea = landmark_features.squeeze(0).permute(1, 0, 2, 3).repeat(2, 1, 1, 1).to(h.dtype).to(h.device)
+            if transformer_options['block'][1] == 0:
+                lmk_fea = landmark_features.squeeze(0).permute(1, 0, 2, 3).to(h.dtype).to(h.device)
+                if "ad_params" in transformer_options and transformer_options["ad_params"]['sub_idxs'] is not None:
+                    sub_idxs = transformer_options['ad_params']['sub_idxs']
+                    lmk_fea = lmk_fea[sub_idxs].repeat(2, 1, 1, 1).to(h.dtype).to(h.device)
+                else:
+                    lmk_fea = lmk_fea.repeat(2, 1, 1, 1)
                 h = h + lmk_fea
             return h
         model_clone = model.clone()
@@ -469,9 +474,6 @@ class FYEMediaPipe:
 
         B, H, W, C = images.shape
        
-        # tensor to pil image
-        #ref_frame = torch.clamp((images + 1.0) / 2.0, min=0, max=1)
-        #ref_frame = ref_frame[0]
         images_np = (images * 255).cpu().numpy().astype(np.uint8)
        
         lmk_extractor = LMKExtractor()
