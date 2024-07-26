@@ -20,32 +20,21 @@ from ..models.utils.pipeline_utils import get_tensor_interpolation_method, set_t
 
 from comfy.utils import ProgressBar
 
-@dataclass
-class VideoPipelineOutput(BaseOutput):
-    videos: Union[torch.Tensor, np.ndarray]
-
-
 class VideoPipeline(DiffusionPipeline):
     _optional_components = []
 
     def __init__(
         self,
-        vae,
-        image_encoder,
         referencenet,
         unet,
-        lmk_guider,
         image_proj_model=None,
         tokenizer=None,
         text_encoder=None
     ):
         super().__init__()
 
-        self.vae=vae
-        self.image_encoder=image_encoder
         self.referencenet=referencenet
         self.unet=unet
-        self.lmk_guider=lmk_guider
         self.image_proj_model=image_proj_model
         self.tokenizer=tokenizer
         self.text_encoder=text_encoder
@@ -54,18 +43,6 @@ class VideoPipeline(DiffusionPipeline):
         self.vae_scaling_factor = 0.18215
         self.clip_image_processor = CLIPImageProcessor()
         self.cond_image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=False)
-
-    def enable_sequential_cpu_offload(self, gpu_id=0):
-        if is_accelerate_available():
-            from accelerate import cpu_offload
-        else:
-            raise ImportError("Please install accelerate via `pip install accelerate`")
-
-        device = torch.device(f"cuda:{gpu_id}")
-
-        for cpu_offloaded_model in [self.unet, self.text_encoder, self.vae]:
-            if cpu_offloaded_model is not None:
-                cpu_offload(cpu_offloaded_model, device)
 
     @property
     def _execution_device(self):
@@ -185,9 +162,8 @@ class VideoPipeline(DiffusionPipeline):
     @torch.no_grad()
     def __call__(
         self,
-        ref_image,
         ref_image_latents,
-        lmk_images,
+        landmark_features,
         width,
         height,
         video_length,
@@ -208,7 +184,6 @@ class VideoPipeline(DiffusionPipeline):
         context_overlap=4,
         context_batch_size=1,
         interpolation_factor=1,
-        pose_multiplier=1.0,
         ref_down_block_multiplier=1.0,
         ref_mid_block_multiplier=1.0,
         ref_up_block_multiplier=1.0,
@@ -238,7 +213,7 @@ class VideoPipeline(DiffusionPipeline):
                 [uncond_encoder_hidden_states, encoder_hidden_states], dim=0
             )
 
-        num_channels_latents = self.unet.in_channels
+        num_channels_latents = self.unet.config.in_channels
 
         latents = self.prepare_latents(
             batch_size * num_images_per_prompt,
@@ -256,28 +231,10 @@ class VideoPipeline(DiffusionPipeline):
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
         # Prepare ref image latents
-        if ref_image_latents is None:
-            ref_image_tensor = self.ref_image_processor.preprocess(
-                ref_image, height=height, width=width
-            )  # (bs, c, width, height)
 
-            ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
-            ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
         ref_image_latents = ref_image_latents * self.vae_scaling_factor  # (b, 4, h, w)
 
-        # Prepare a list of lmk condition images
-        lmk_cond_tensor_list = []
-        for lmk_image in lmk_images:
-            lmk_cond_tensor = self.cond_image_processor.preprocess(
-                lmk_image, height=height, width=width
-            )
-
-            lmk_cond_tensor = lmk_cond_tensor.unsqueeze(2)  # (bs, c, 1, h, w)
-            lmk_cond_tensor_list.append(lmk_cond_tensor)
-        lmk_cond_tensor = torch.cat(lmk_cond_tensor_list, dim=2)  # (bs, c, t, h, w)
-        lmk_cond_tensor = lmk_cond_tensor.to(device=device, dtype=self.lmk_guider.dtype)
-
-        lmk_fea = self.lmk_guider(lmk_cond_tensor)
+        lmk_fea = landmark_features.to(self.unet.dtype)
 
         # context_schedule = uniform
         context_scheduler = get_context_scheduler(context_schedule)
@@ -339,6 +296,7 @@ class VideoPipeline(DiffusionPipeline):
                     )
 
                 for context in global_context:
+                    print("latent_shape: ", latents.shape)
                     # 3.1 expand the latents if we are doing classifier free guidance
                     latent_model_input = (
                         torch.cat([latents[:, :, c] for c in context])
@@ -363,8 +321,7 @@ class VideoPipeline(DiffusionPipeline):
                                       encoder_hidden_states=encoder_hidden_states[:b],
                                       reference_down_block_res_samples=reference_down_block_res_samples,
                                       reference_mid_block_res_sample=reference_mid_block_res_sample,
-                                      reference_up_block_res_samples=reference_up_block_res_samples,
-                                      pose_multiplier=pose_multiplier
+                                      reference_up_block_res_samples=reference_up_block_res_samples
                                       ).sample
 
                     for j, c in enumerate(context):
@@ -412,9 +369,8 @@ class VideoPipeline(DiffusionPipeline):
     @torch.no_grad()
     def forward_long(
         self,
-        ref_image,
         ref_image_latents,
-        lmk_images,
+        landmark_features,
         width,
         height,
         video_length,
@@ -482,27 +438,8 @@ class VideoPipeline(DiffusionPipeline):
         # Prepare extra step kwargs.
         extra_step_kwargs = self.prepare_extra_step_kwargs(generator, eta)
 
-        # Prepare ref image latents
-        if ref_image_latents is None:
-            ref_image_tensor = self.ref_image_processor.preprocess(ref_image, height=height, width=width)  # (bs, c, width, height)
-
-            ref_image_tensor = ref_image_tensor.to(dtype=self.vae.dtype, device=self.vae.device)
-            ref_image_latents = self.vae.encode(ref_image_tensor).latent_dist.mean
         ref_image_latents = ref_image_latents * self.vae_scaling_factor  # (b, 4, h, w)
-
-        # Prepare a list of lmk condition images
-        lmk_cond_tensor_list = []
-        for lmk_image in lmk_images:
-            lmk_cond_tensor = self.cond_image_processor.preprocess(
-                lmk_image, height=height, width=width
-            )
-
-            lmk_cond_tensor = lmk_cond_tensor.unsqueeze(2)  # (bs, c, 1, h, w)
-            lmk_cond_tensor_list.append(lmk_cond_tensor)
-        lmk_cond_tensor = torch.cat(lmk_cond_tensor_list, dim=2)  # (bs, c, t, h, w)
-        lmk_cond_tensor = lmk_cond_tensor.to(device=device, dtype=self.lmk_guider.dtype)
-
-        lmk_fea = self.lmk_guider(lmk_cond_tensor)
+        lmk_fea = landmark_features.to(self.unet.dtype)
 
         # ---------------------------------------------
 
@@ -567,8 +504,7 @@ class VideoPipeline(DiffusionPipeline):
                                             encoder_hidden_states=encoder_hidden_states[:b],
                                             reference_down_block_res_samples=reference_down_block_res_samples,
                                             reference_mid_block_res_sample=reference_mid_block_res_sample,
-                                            reference_up_block_res_samples=reference_up_block_res_samples,
-                                            pose_multiplier=pose_multiplier
+                                            reference_up_block_res_samples=reference_up_block_res_samples
                                             ).sample
 
                     # perform guidance
@@ -609,12 +545,3 @@ class VideoPipeline(DiffusionPipeline):
 
         # ---------------------------------------------
         return latents
-
-    def get_timesteps(self, num_inference_steps):
-        # get the original timestep using init_timestep
-        init_timestep = min(int(num_inference_steps * self.strength), num_inference_steps)
-
-        t_start = max(num_inference_steps - init_timestep, 0)
-        timesteps = self.scheduler.timesteps[t_start * self.scheduler.order :]
-
-        return timesteps, num_inference_steps - t_start

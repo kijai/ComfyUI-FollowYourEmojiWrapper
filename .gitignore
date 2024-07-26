@@ -26,7 +26,7 @@ out_videos/
 .idea/
 
 # *.ipynb
-*.safetensors
+#*.safetensors
 *.ckpt
 
 /mmpose/ckpt/

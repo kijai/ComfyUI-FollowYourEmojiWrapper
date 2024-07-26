@@ -415,7 +415,6 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
         down_block_additional_residuals: Optional[Tuple[torch.Tensor]] = None,
         mid_block_additional_residual: Optional[torch.Tensor] = None,
         return_dict: bool = True,
-        pose_multiplier: float = 1.0,
 
         # support referencenet
         reference_down_block_res_samples=None,
@@ -497,9 +496,12 @@ class UNet3DConditionModel(ModelMixin, ConfigMixin):
             emb = emb + class_emb
 
         # pre-process
+        print("sample shape before: ",sample.shape)
         sample = self.conv_in(sample)
+        print("sample shape: ",sample.shape)
+        print("lmk_cond_fea shape: ",lmk_cond_fea.shape)
         if lmk_cond_fea is not None:
-            sample = sample + lmk_cond_fea * pose_multiplier
+            sample = sample + lmk_cond_fea
 
         # ======================================================================================================
         if reference_down_block_res_samples is not None:
