@@ -4,3 +4,4 @@ opencv-python
 mediapipe
 transformers
 einops
+omegaconf
