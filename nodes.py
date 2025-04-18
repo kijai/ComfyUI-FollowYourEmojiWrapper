@@ -10,19 +10,6 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from omegaconf import OmegaConf
-
-from .models.guider import Guider
-from .models.referencenet import ReferenceNet2DConditionModel
-from .models.unet import UNet3DConditionModel
-from .models.video_pipeline import VideoPipeline
-
-from .media_pipe.mp_utils  import LMKExtractor
-from .media_pipe.draw_util import FaceMeshVisualizer
-from .media_pipe import FaceMeshAlign
-import cv2
-
-from .diffusers import DDIMScheduler, DPMSolverMultistepScheduler, UniPCMultistepScheduler, DEISMultistepScheduler, DDPMScheduler
-from .diffusers.image_processor import VaeImageProcessor
   
 from contextlib import nullcontext
 try:
@@ -75,6 +62,10 @@ class DownloadAndLoadFYEModel:
     CATEGORY = "FollowYourEmojiWrapper"
 
     def loadmodel(self, precision):
+        
+        from .models.referencenet import ReferenceNet2DConditionModel
+        from .models.unet import UNet3DConditionModel
+        from .models.video_pipeline import VideoPipeline
         device = mm.get_torch_device()
         mm.soft_empty_cache()
 
@@ -212,6 +203,8 @@ class FYELandmarkEncode:
     CATEGORY = "FollowYourEmojiWrapper"
 
     def encode(self, motions, strength):
+        from .models.guider import Guider
+        from .diffusers.image_processor import VaeImageProcessor
         B, H, W, C = motions.shape
         device=mm.get_torch_device()
 
@@ -339,6 +332,8 @@ class FYESampler:
         return({"samples":latents},)
     
 def common_process(pipeline, ref_latent, seed, scheduler):
+    from .diffusers import DDIMScheduler, DPMSolverMultistepScheduler, UniPCMultistepScheduler, DEISMultistepScheduler, DDPMScheduler
+    
 
     scheduler_config = {
             "num_train_timesteps": 1000,
@@ -470,6 +465,10 @@ class FYEMediaPipe:
     CATEGORY = "FollowYourEmojiWrapper"
 
     def process(self, images, draw_outer_lips, draw_iris_points, align_to_face_results=None):
+        from .media_pipe.mp_utils  import LMKExtractor
+        from .media_pipe.draw_util import FaceMeshVisualizer
+        from .media_pipe import FaceMeshAlign
+        import cv2
         device = mm.get_torch_device()
 
         B, H, W, C = images.shape
